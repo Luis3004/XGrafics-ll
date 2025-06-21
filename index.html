@@ -12,7 +12,36 @@
         body {
             font-family: 'Inter', sans-serif;
         }
+        /* Estilo para los color pickers */
+        input[type="color"] {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            width: 25px; /* Tamaño del cuadrado del color */
+            height: 25px;
+            background-color: transparent;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px; /* Bordes redondeados */
+            padding: 0;
+            margin-left: 5px;
+            vertical-align: middle;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+        input[type="color"]::-webkit-color-swatch {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        input[type="color"]::-moz-color-swatch {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
     </style>
+    <!-- Código de AdSense -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-1293967488755403"
+     crossorigin="anonymous"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -29,18 +58,51 @@
     <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
 
     <script type="text/babel">
+        // Función auxiliar para generar un color RGB aleatorio con transparencia
+        const getRandomColor = () => {
+            const r = Math.floor(Math.random() * 255);
+            const g = Math.floor(Math.random() * 255);
+            const b = Math.floor(Math.random() * 255);
+            return `rgba(${r}, ${g}, ${b}, 0.6)`;
+        };
+
+        // Función para generar un código alfanumérico y con símbolos de 8 caracteres
+        const generateShortCode = () => {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?';
+            let result = '';
+            for (let i = 0; i < 8; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        };
+
         // Componente principal de la aplicación
         const App = () => {
+            // Colores predefinidos para las series del gráfico (se usan si no se especifican)
+            const initialChartColors = React.useMemo(() => [
+                'rgba(75, 192, 192, 0.6)', // Teal
+                'rgba(153, 102, 255, 0.6)', // Purple
+                'rgba(255, 159, 64, 0.6)', // Orange
+                'rgba(255, 99, 132, 0.6)', // Red
+                'rgba(54, 162, 235, 0.6)', // Blue
+                'rgba(201, 203, 207, 0.6)', // Grey
+                'rgba(255, 206, 86, 0.6)', // Yellow
+            ], []);
+
             // Estado para las filas de la tabla. Cada fila es un array de strings.
-            // La primera columna será para las etiquetas (nombres de datos).
             const [tableData, setTableData] = React.useState([
                 ['Categoría A', '10', '20'],
                 ['Categoría B', '15', '25'],
                 ['Categoría C', '7', '18'],
             ]);
 
-            // Estado para los nombres de las columnas (series de datos)
-            const [columnNames, setColumnNames] = React.useState(['Etiqueta', 'Serie 1', 'Serie 2']);
+            // Estado para los nombres de las columnas (series de datos) y sus colores
+            // La primera columna es siempre la etiqueta, las siguientes son series de datos.
+            const [columnNames, setColumnNames] = React.useState([
+                { id: 'label', name: 'Etiqueta', isLabel: true },
+                { id: 'serie1', name: 'Serie 1', color: initialChartColors[0] },
+                { id: 'serie2', name: 'Serie 2', color: initialChartColors[1] },
+            ]);
 
             // Estado para el tipo de gráfico seleccionado
             const [chartType, setChartType] = React.useState('bar'); // 'bar', 'line', 'pie'
@@ -48,23 +110,28 @@
             // Estado para el título del gráfico
             const [chartTitle, setChartTitle] = React.useState('Gráfico de Datos'); // Nuevo estado para el título
 
-            // Estado para el historial de gráficos
-            const [chartHistory, setChartHistory] = React.useState([]);
+            // Estado para el historial de gráficos (limitado a 15)
+            const MAX_HISTORY_ITEMS = 15; // Límite de elementos en el historial
+            const [chartHistory, setChartHistory] = React.useState(() => {
+                // Intentar cargar el historial desde localStorage al inicio
+                try {
+                    const savedHistory = localStorage.getItem('xgraficsHistory');
+                    return savedHistory ? JSON.parse(savedHistory) : [];
+                } catch (error) {
+                    console.error("Error al cargar el historial desde localStorage:", error);
+                    return [];
+                }
+            });
+
+            // Estado para el código de gráfico generado
+            const [generatedGraphCode, setGeneratedGraphCode] = React.useState('');
+            // Estado para el código de gráfico a cargar
+            const [loadGraphCodeInput, setLoadGraphCodeInput] = React.useState('');
+
 
             // Referencia para el elemento canvas donde se dibujará el gráfico
             const chartRef = React.useRef(null);
             const chartInstance = React.useRef(null); // Referencia a la instancia de Chart.js
-
-            // Colores para las series del gráfico
-            const chartColors = [
-                'rgba(75, 192, 192, 0.6)',
-                'rgba(153, 102, 255, 0.6)',
-                'rgba(255, 159, 64, 0.6)',
-                'rgba(255, 99, 132, 0.6)',
-                'rgba(54, 162, 235, 0.6)',
-                'rgba(201, 203, 207, 0.6)',
-                'rgba(255, 206, 86, 0.6)',
-            ];
 
             // Función para obtener los datos del gráfico a partir de tableData
             const getChartData = React.useCallback(() => {
@@ -72,12 +139,13 @@
 
                 // Extraer los datasets (series de datos) de las columnas restantes
                 const datasets = [];
-                for (let i = 1; i < columnNames.length; i++) {
+                for (let i = 1; i < columnNames.length; i++) { // Empezar desde la segunda columna (índice 1)
+                    const serie = columnNames[i];
                     datasets.push({
-                        label: columnNames[i],
+                        label: serie.name,
                         data: tableData.map(row => parseFloat(row[i]) || 0), // Convertir a número, si no es válido, usa 0
-                        backgroundColor: chartColors[i - 1] || 'rgba(0,0,0,0.6)', // Asignar color de la lista
-                        borderColor: chartColors[i - 1]?.replace('0.6', '1') || 'rgba(0,0,0,1)', // Un poco más oscuro para el borde
+                        backgroundColor: serie.color, // Usar el color definido en columnNames
+                        borderColor: serie.color.replace('0.6', '1'), // Un poco más oscuro para el borde
                         borderWidth: 1,
                     });
                 }
@@ -86,7 +154,7 @@
                     labels: labels,
                     datasets: datasets,
                 };
-            }, [tableData, columnNames, chartColors]);
+            }, [tableData, columnNames]);
 
             // Plugin de Chart.js para añadir la marca de agua "XGrafics"
             const watermarkPlugin = {
@@ -105,8 +173,17 @@
                 },
             };
 
-            // Función para añadir el estado actual del gráfico al historial
-            const addCurrentChartToHistory = React.useCallback(() => {
+            // Efecto para guardar el historial en localStorage cada vez que cambie
+            React.useEffect(() => {
+                try {
+                    localStorage.setItem('xgraficsHistory', JSON.stringify(chartHistory));
+                } catch (error) {
+                    console.error("Error al guardar el historial en localStorage:", error);
+                }
+            }, [chartHistory]);
+
+            // Función para añadir el estado actual del gráfico al historial, incluyendo el formato de descarga
+            const addCurrentChartToHistory = React.useCallback((format) => {
                 if (chartRef.current) {
                     const imageUrl = chartRef.current.toDataURL('image/png'); // Capturar imagen para miniatura
                     const now = new Date();
@@ -114,19 +191,20 @@
                         id: now.getTime(), // ID único basado en el timestamp
                         type: chartType,
                         data: tableData, // Almacenar los datos de la tabla
-                        columnNames: columnNames, // Almacenar nombres de columnas
+                        columnNames: columnNames, // Almacenar nombres de columnas (incluyendo colores)
                         imageUrl: imageUrl, // URL de la imagen para la miniatura
                         timestamp: now.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }), // Fecha y hora
                         title: chartTitle, // Guardar el título actual del gráfico
+                        downloadFormat: format, // Guardar el formato de descarga
                     };
 
                     setChartHistory(prevHistory => {
-                        // Evitar añadir instantáneas idénticas rápidamente
-                        const lastItem = prevHistory[prevHistory.length - 1];
-                        if (lastItem && JSON.stringify(lastItem.data) === JSON.stringify(newHistoryItem.data) && lastItem.type === newHistoryItem.type && lastItem.title === newHistoryItem.title) {
-                            return prevHistory;
+                        // Limitar el historial a MAX_HISTORY_ITEMS
+                        let updatedHistory = [...prevHistory]; // Copiar el array para evitar mutaciones directas
+                        if (updatedHistory.length >= MAX_HISTORY_ITEMS) {
+                            updatedHistory = updatedHistory.slice(1); // Eliminar el elemento más antiguo
                         }
-                        return [...prevHistory, newHistoryItem];
+                        return [...updatedHistory, newHistoryItem];
                     });
                 }
             }, [chartType, tableData, columnNames, chartTitle]);
@@ -172,20 +250,16 @@
                     plugins: [watermarkPlugin], // Registrar el plugin de marca de agua
                 });
 
-                // Añadir al historial después de que el gráfico se haya actualizado/renderizado
-                // Un pequeño retraso para asegurar que la imagen esté disponible
-                const updateTimer = setTimeout(() => {
-                    addCurrentChartToHistory();
-                }, 150);
+                // NO SE AÑADE AL HISTORIAL AUTOMÁTICAMENTE AQUÍ. SOLO SE HACE AL DESCARGAR.
 
                 // Función de limpieza para destruir el gráfico al desmontar el componente
                 return () => {
-                    clearTimeout(updateTimer);
                     if (chartInstance.current) {
                         chartInstance.current.destroy();
                     }
                 };
-            }, [chartType, getChartData, addCurrentChartToHistory, chartTitle]); // Añadir chartTitle a las dependencias
+            }, [chartType, getChartData, chartTitle]); // Dependencias: tipo de gráfico, función de datos y título
+
 
             // --- Funciones para manipular la tabla ---
 
@@ -205,7 +279,13 @@
 
             // Añadir una nueva columna
             const addColumn = () => {
-                setColumnNames(prevNames => [...prevNames, `Serie ${prevNames.length}`]);
+                setColumnNames(prevNames => {
+                    // Generar un ID único y un color aleatorio para la nueva serie
+                    const newId = `serie${prevNames.length + 1}`;
+                    // Ciclar a través de colores predefinidos si hay más series que colores iniciales
+                    const newColor = initialChartColors[(prevNames.length - 1) % initialChartColors.length]; 
+                    return [...prevNames, { id: newId, name: `Serie ${prevNames.length}`, color: newColor }];
+                });
                 setTableData(prevData => prevData.map(row => [...row, ''])); // Añadir una celda vacía a cada fila existente
             };
 
@@ -234,7 +314,23 @@
             const handleColumnNameChange = (colIndex, value) => {
                 setColumnNames(prevNames => {
                     const newNames = [...prevNames];
-                    newNames[colIndex] = value;
+                    newNames[colIndex] = { ...newNames[colIndex], name: value }; // Actualiza solo el nombre
+                    return newNames;
+                });
+            };
+
+            // Manejar el cambio en el color de la columna
+            const handleColumnColorChange = (colIndex, value) => {
+                setColumnNames(prevNames => {
+                    const newNames = [...prevNames];
+                    // Mantener la transparencia (alpha) del color original si es RGBa, si no, añadir 0.6
+                    let finalColor = value;
+                    if (newNames[colIndex].color.startsWith('rgba(')) {
+                       finalColor = value + newNames[colIndex].color.substring(newNames[colIndex].color.lastIndexOf(','));
+                    } else {
+                        finalColor = value + '60'; // Añadir alpha 0.6 por defecto
+                    }
+                    newNames[colIndex] = { ...newNames[colIndex], color: finalColor }; // Actualiza solo el color
                     return newNames;
                 });
             };
@@ -242,10 +338,79 @@
             // Función para cargar un elemento del historial en el gráfico principal
             const loadHistoryItem = (item) => {
                 setTableData(item.data);
-                setColumnNames(item.columnNames);
+                setColumnNames(item.columnNames); // Asegurarse de cargar la estructura completa
                 setChartType(item.type);
                 setChartTitle(item.title); // Cargar el título desde el historial
             };
+            
+            // Función para borrar un elemento específico del historial
+            const removeHistoryItem = (idToRemove) => {
+                setChartHistory(prevHistory => prevHistory.filter(item => item.id !== idToRemove));
+            };
+
+            // --- Funciones de generación y carga de código de gráfica ---
+            const generateGraphCode = () => {
+                const graphState = {
+                    tableData,
+                    columnNames,
+                    chartType,
+                    chartTitle
+                };
+                const jsonString = JSON.stringify(graphState);
+                const fullEncodedString = btoa(jsonString); // Full Base64 encoded data
+
+                // Generar un código corto y único para la búsqueda local
+                let shortCode = generateShortCode();
+                // Asegurar la unicidad (aunque para 8 caracteres y poco historial es poco probable)
+                while (localStorage.getItem(`xgrafics_code_${shortCode}`)) {
+                    shortCode = generateShortCode();
+                }
+
+                // Almacenar los datos codificados completos en localStorage, indexados por el código corto
+                localStorage.setItem(`xgrafics_code_${shortCode}`, fullEncodedString);
+                setGeneratedGraphCode(shortCode); // Mostrar el código corto
+
+                // Copiar el código corto al portapapeles
+                navigator.clipboard.writeText(shortCode)
+                    .then(() => alert(`¡Código de gráfica "${shortCode}" generado y copiado al portapapeles! Este código se guarda en este dispositivo. Para cargar en otro dispositivo, se necesitaría un sistema de almacenamiento en la nube.`))
+                    .catch(err => console.error('Error al copiar el código:', err));
+            };
+
+            const loadGraphFromCode = () => {
+                try {
+                    const shortCodeToLoad = loadGraphCodeInput.trim();
+                    if (!shortCodeToLoad) {
+                        alert('Por favor, introduce un código de gráfica.');
+                        return;
+                    }
+
+                    // Recuperar la cadena Base64 completa de localStorage usando el código corto
+                    const fullEncodedString = localStorage.getItem(`xgrafics_code_${shortCodeToLoad}`);
+
+                    if (!fullEncodedString) {
+                        alert('Código de gráfica no encontrado en este dispositivo. Asegúrate de haberlo generado en este mismo dispositivo o que los datos hayan sido transferidos.');
+                        return;
+                    }
+
+                    const decodedString = atob(fullEncodedString); // Base64 decode
+                    const graphState = JSON.parse(decodedString);
+
+                    if (graphState && graphState.tableData && graphState.columnNames && graphState.chartType && graphState.chartTitle !== undefined) {
+                        setTableData(graphState.tableData);
+                        setColumnNames(graphState.columnNames);
+                        setChartType(graphState.chartType);
+                        setChartTitle(graphState.chartTitle);
+                        alert('¡Gráfico cargado con éxito!');
+                        setLoadGraphCodeInput(''); // Limpiar input después de cargar
+                    } else {
+                        throw new Error('Estructura de código inválida.');
+                    }
+                } catch (error) {
+                    console.error("Error al cargar el gráfico desde el código:", error);
+                    alert('Error al cargar el gráfico. El código no es válido o está corrupto.');
+                }
+            };
+            // --- Fin funciones de generación y carga de código de gráfica ---
 
             // --- Funciones de descarga ---
 
@@ -255,10 +420,11 @@
                     const url = chartRef.current.toDataURL('image/png');
                     const link = document.createElement('a');
                     link.href = url;
-                    link.download = `${chartTitle.replace(/[^a-zA-Z0-9]/g, '_') || 'grafico'}_xgrafics.png`; // Usa el título del gráfico para el nombre del archivo
+                    link.download = `${chartTitle.replace(/[^a-zA-Z0-9]/g, '_') || 'grafico'}_xgrafics.png`;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
+                    addCurrentChartToHistory('PNG'); // Añadir al historial con formato PNG
                 }
             };
 
@@ -275,23 +441,30 @@
                     const y = (pageHeight - imgHeight) / 2;
 
                     doc.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
-                    doc.save(`${chartTitle.replace(/[^a-zA-Z0-9]/g, '_') || 'grafico'}_xgrafics.pdf`); // Usa el título del gráfico para el nombre del archivo
+                    doc.save(`${chartTitle.replace(/[^a-zA-Z0-9]/g, '_') || 'grafico'}_xgrafics.pdf`);
+                    addCurrentChartToHistory('PDF'); // Añadir al historial con formato PDF
                 } else {
                     console.error("Error: jsPDF no está cargado o chartRef no está disponible.");
+                    alert("La librería para PDF no está cargada correctamente. Intenta recargar la página.");
                 }
             };
 
-            // Descargar los datos de la tabla como archivo XLS (Excel) - No cambia
+            // Descargar los datos de la tabla como archivo XLS (descarga directa)
             const downloadXLS = () => {
                 if (typeof window.XLSX !== 'undefined') {
                     const XLSX = window.XLSX;
-                    const dataToExport = [columnNames, ...tableData];
+                    // Preparar los datos para XLS: nombres de columnas y luego los datos de la tabla
+                    const headerRow = columnNames.map(col => col.name);
+                    const dataToExport = [headerRow, ...tableData];
+                    
                     const ws = XLSX.utils.aoa_to_sheet(dataToExport);
                     const wb = XLSX.utils.book_new();
                     XLSX.utils.book_append_sheet(wb, ws, "Datos");
-                    XLSX.writeFile(wb, `${chartTitle.replace(/[^a-zA-Z0-9]/g, '_') || 'datos'}_xgrafics.xlsx`); // Usa el título del gráfico para el nombre del archivo
+                    XLSX.writeFile(wb, `${chartTitle.replace(/[^a-zA-Z0-9]/g, '_') || 'datos'}_xgrafics.xlsx`);
+                    addCurrentChartToHistory('XLS'); // Añadir al historial con formato XLS
                 } else {
                     console.error("Error: XLSX no está cargado.");
+                    alert("La librería para XLS no está cargada correctamente. Intenta recargar la página.");
                 }
             };
 
@@ -305,7 +478,7 @@
 
                         {/* Panel de control y tabla de datos */}
                         <div className="flex flex-col w-full lg:w-1/2 space-y-6">
-                            <h2 className="text-2xl font-semibold text-gray-700">Datos y Configuración</h2>
+                            <h2 className="text-2xl font-semibold text-gray-700 mb-4">Datos y Configuración</h2>
 
                             {/* Controles de la tabla */}
                             <div className="flex flex-wrap gap-3 p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200">
@@ -340,23 +513,33 @@
                                 <table className="min-w-full divide-y divide-gray-200 bg-white">
                                     <thead className="bg-gray-100">
                                         <tr>
-                                            {columnNames.map((name, colIndex) => (
+                                            {columnNames.map((col, colIndex) => (
                                                 <th
                                                     key={colIndex}
-                                                    className="px-6 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider"
+                                                    className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider"
                                                 >
-                                                    {/* La primera columna no se puede editar su nombre directamente */}
-                                                    {colIndex === 0 ? (
-                                                        name
-                                                    ) : (
-                                                        <input
-                                                            type="text"
-                                                            value={name}
-                                                            onChange={(e) => handleColumnNameChange(colIndex, e.target.value)}
-                                                            className="w-full bg-transparent border-b border-gray-300 focus:outline-none focus:border-blue-500 py-1"
-                                                            aria-label={`Nombre de columna ${colIndex}`}
-                                                        />
-                                                    )}
+                                                    <div className="flex items-center justify-between">
+                                                        {/* La primera columna es etiqueta, las demás series de datos */}
+                                                        {col.isLabel ? (
+                                                            <span>{col.name}</span>
+                                                        ) : (
+                                                            <>
+                                                                <input
+                                                                    type="text"
+                                                                    value={col.name}
+                                                                    onChange={(e) => handleColumnNameChange(colIndex, e.target.value)}
+                                                                    className="w-full bg-transparent border-b border-gray-300 focus:outline-none focus:border-blue-500 py-1"
+                                                                    aria-label={`Nombre de columna ${colIndex}`}
+                                                                />
+                                                                <input
+                                                                    type="color"
+                                                                    value={col.color.substring(0, 7)} /* Solo el RGB, no el alpha */
+                                                                    onChange={(e) => handleColumnColorChange(colIndex, e.target.value)} /* Eliminar la adición de '60' aquí */
+                                                                    aria-label={`Color de columna ${colIndex}`}
+                                                                />
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </th>
                                             ))}
                                         </tr>
@@ -450,6 +633,41 @@
                                     Descargar XLS
                                 </button>
                             </div>
+
+                            {/* Sección de Código de Gráfica */}
+                            <div className="p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200 space-y-4">
+                                <h3 className="text-lg font-semibold text-gray-700">Compartir/Cargar por Código</h3>
+                                <button
+                                    onClick={generateGraphCode}
+                                    className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105"
+                                >
+                                    Generar Código de Gráfica
+                                </button>
+                                {generatedGraphCode && (
+                                    <textarea
+                                        readOnly
+                                        value={generatedGraphCode}
+                                        className="w-full h-24 p-2 border border-gray-300 rounded-md text-sm bg-white"
+                                        onFocus={(e) => e.target.select()} // Seleccionar todo al enfocar para copiar fácilmente
+                                        placeholder="Tu código de gráfica aparecerá aquí"
+                                    ></textarea>
+                                )}
+                                <div className="space-y-2">
+                                    <input
+                                        type="text"
+                                        value={loadGraphCodeInput}
+                                        onChange={(e) => setLoadGraphCodeInput(e.target.value)}
+                                        placeholder="Pega el código de la gráfica aquí"
+                                        className="w-full p-2 border border-gray-300 rounded-md"
+                                    />
+                                    <button
+                                        onClick={loadGraphFromCode}
+                                        className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-200 ease-in-out transform hover:scale-105"
+                                    >
+                                        Cargar Gráfica por Código
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -457,13 +675,14 @@
                     <div className="w-full max-w-6xl bg-white rounded-lg shadow-xl p-6 mt-6 mb-6">
                         <h2 className="text-2xl font-semibold text-gray-700 mb-4">Historial de Gráficos</h2>
                         {chartHistory.length === 0 ? (
-                            <p className="text-gray-500">No hay gráficos en el historial aún. Edita la tabla o cambia el tipo de gráfico para añadir uno.</p>
+                            <p className="text-gray-500 text-center">No hay gráficos en el historial aún. Se añadirán al descargar.</p>
                         ) : (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                                 {chartHistory.map(item => (
                                     <div key={item.id} className="border border-gray-200 rounded-lg p-2 flex flex-col items-center justify-between text-center">
                                         <img src={item.imageUrl} alt={`Gráfico ${item.type} del ${item.timestamp}`} className="w-full h-32 object-contain mb-2 rounded-md border border-gray-100"/>
                                         <p className="text-sm font-medium text-gray-800">{item.title} ({item.type.charAt(0).toUpperCase() + item.type.slice(1)})</p>
+                                        <p className="text-xs text-gray-500 mb-1">Descargado como: {item.downloadFormat}</p> {/* Muestra el formato de descarga */}
                                         <p className="text-xs text-gray-500 mb-2">{item.timestamp}</p>
                                         <button
                                             onClick={() => loadHistoryItem(item)}
